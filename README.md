@@ -1,36 +1,54 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# QR Relay
 
-## Getting Started
+A password-protected relay for one printed QR code.
 
-First, run the development server:
+- `relay.medhelix.com/` shows the login form. After you sign in, the dashboard lets you set the destination URL and download the QR code.
+- `relay.medhelix.com/go` is the URL printed in the QR code. It sends a `307` redirect to the saved destination with `Cache-Control: no-store`, so changes take effect on the very next scan.
 
-```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
-```
+The destination is stored as a single key (`relay:destination`) in Upstash Redis, because Vercel functions can't keep data between requests on their own.
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+## Local setup
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+1. Install dependencies:
+   ```bash
+   npm install
+   ```
+2. Copy the env template and fill it in:
+   ```bash
+   cp .env.example .env.local
+   ```
+   | Variable | Value |
+   | --- | --- |
+   | `ADMIN_EMAIL` / `ADMIN_PASSWORD` | Your login |
+   | `AUTH_SECRET` | Output of `openssl rand -base64 32` (must be 32+ characters) |
+   | `UPSTASH_REDIS_REST_URL` / `UPSTASH_REDIS_REST_TOKEN` | From your Upstash database (see below) |
+   | `NEXT_PUBLIC_APP_URL` | `https://relay.medhelix.com` in production, `http://localhost:3000` locally |
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+   The server refuses to start, with a clear message, if any of these are missing or invalid.
+3. Run the dev server and open http://localhost:3000:
+   ```bash
+   npm run dev
+   ```
 
-## Learn More
+## Adding Upstash Redis through the Vercel Marketplace
 
-To learn more about Next.js, take a look at the following resources:
+1. In the Vercel dashboard, open your project, go to **Storage**, click **Create Database** and choose **Upstash for Redis**. The free plan is plenty.
+2. Connect the database to the project for all environments. Vercel adds the connection env vars for you. They may be named `KV_REST_API_URL` / `KV_REST_API_TOKEN`, and the app accepts those too.
+3. For local development, copy the REST URL and token from the Upstash console into `.env.local` (or run `vercel env pull .env.local`).
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+## Deploying on Vercel
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+1. Add `ADMIN_EMAIL`, `ADMIN_PASSWORD`, `AUTH_SECRET` and `NEXT_PUBLIC_APP_URL=https://relay.medhelix.com` under **Project → Settings → Environment Variables**.
+2. Env var changes only apply to new deployments. Go to **Deployments → ⋯ → Redeploy**, or push a commit.
+3. Attach the domain under **Project → Settings → Domains → Add**, then enter `relay.medhelix.com`. At your DNS provider, add the `CNAME` record Vercel shows (`relay` → `cname.vercel-dns.com`). HTTPS is set up automatically.
 
-## Deploy on Vercel
+> **Print the QR code only after `NEXT_PUBLIC_APP_URL` is set to `https://relay.medhelix.com`.** Check the "Encoded URL" on the dashboard first. It must never be a `*.vercel.app` URL.
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+## Security
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+- Credentials are compared in constant time.
+- Sessions are HS256-signed JWTs stored in an `httpOnly` cookie and valid for 7 days.
+- Login is limited to 5 attempts per 15 minutes per IP.
+- `proxy.ts` guards `/admin` and `/api/admin/*`, and every Server Action and admin API route also checks the session itself.
+- Security headers, `noindex` and a disallow-all `robots.txt` are set.
+# mh-qr-relay
